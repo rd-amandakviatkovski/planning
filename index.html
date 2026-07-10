@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planning Semanal</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <h1>Planning Semanal</h1>
+    </header>
+
+    <div class="pulse">
+      <div class="pulse-tagline" id="tagline">Carregando…</div>
+      <div class="pulse-days" id="pulseDays"></div>
+    </div>
+
+    <section class="card" id="links-card">
+      <div class="badges" id="badges"></div>
+      <div class="add-inline">
+        <input type="text" id="newLinkIcon" placeholder="📄" style="max-width:50px;text-align:center;">
+        <input type="text" id="newLinkText" placeholder="Nome do link">
+        <input type="url" id="newLinkUrl" placeholder="https://...">
+        <button onclick="addLink()">+ Link</button>
+      </div>
+    </section>
+
+    <section class="card" id="semana">
+      <h2>Semana</h2>
+      <div class="week-controls">
+        <select id="weekSelect" onchange="onWeekSelectChange()"></select>
+        <button class="ghost" onclick="planFutureWeek()">+ Planejar semana futura</button>
+        <button id="promoteBtn" style="display:none;" onclick="promoteCurrentView()">Tornar esta a semana atual →</button>
+        <button class="ghost" onclick="endWeek(false)">Encerrar semana e iniciar nova →</button>
+        <button class="ghost" onclick="endWeek(true)">Encerrar e copiar tarefas da semana anterior →</button>
+      </div>
+      <p class="hint">Para organizar o que precisa ser feito em cada dia. Use "Planejar semana futura" pra já montar a próxima semana sem mexer na atual — quando ela chegar, é só clicar em "Tornar esta a semana atual".</p>
+      <div class="week-board" id="weekBoard"></div>
+    </section>
+
+    <section class="card" id="entregas">
+      <h2>Entregas da semana</h2>
+      <p class="hint">Para entender se conseguiu entregar tudo que precisa e se entregou algo a mais.</p>
+      <div class="table-filters">
+        <select id="filterStatus" onchange="onEntregasFilterChange()">
+          <option value="Todos">Status: todos</option>
+          <option value="standby">standby</option>
+          <option value="andamento">andamento</option>
+          <option value="concluído">concluído</option>
+        </select>
+        <select id="filterPrioridade" onchange="onEntregasFilterChange()">
+          <option value="Todos">Prioridade: todas</option>
+          <option value="Alta">Alta</option>
+          <option value="Média">Média</option>
+          <option value="Baixa">Baixa</option>
+        </select>
+        <button class="ghost sort-btn" id="sortBtn" onclick="toggleEntregasSort()">Entrega A → Z</button>
+      </div>
+      <table id="entregasTable">
+        <thead><tr><th style="width:110px;">Prioridade</th><th>Entrega</th><th style="width:140px;">Status</th><th class="del-col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="ghost" style="margin-top:10px;" onclick="addEntrega()">+ Entrega</button>
+    </section>
+
+    <section class="card" id="tarefas">
+      <h2>Tarefas da semana</h2>
+      <p class="hint">Para organizar o que será feito na semana, com subtarefas e links do Jira.</p>
+      <div id="gruposList"></div>
+      <button class="ghost" onclick="addGrupo()">+ Grupo de tarefas</button>
+    </section>
+
+    <section class="card" id="pensar">
+      <h2>Para pensar e organizar</h2>
+      <p class="hint">Para mapear tarefas ou projetos não urgentes que podem ficar para o futuro.</p>
+      <table id="pensarTable">
+        <thead><tr><th>Tarefa central</th><th style="width:210px;">Documento</th><th style="width:110px;">Prioridade</th><th class="del-col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="ghost" style="margin-top:10px;" onclick="addPensar()">+ Tarefa</button>
+    </section>
+
+    <section class="card" id="planning">
+      <h2>Reunião de planning semanal</h2>
+      <p class="hint">Para organizar outcomes e bloqueios.</p>
+      <h4 style="margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);">Outcomes (resultados / entregas)</h4>
+      <textarea id="outcomes" placeholder="Liste os principais resultados esperados na semana..." onblur="savePlanning()"></textarea>
+      <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);">Bloqueios</h4>
+      <textarea id="bloqueios" placeholder="O que está travando o andamento?" onblur="savePlanning()"></textarea>
+    </section>
+
+    <section class="card" id="reunioes">
+      <h2>Reuniões</h2>
+      <p class="hint">Para organizar as reuniões e anotar coisas importantes delas.</p>
+      <table id="reunioesTable">
+        <thead><tr><th>Reunião</th><th style="width:210px;">Documentos</th><th>To-dos</th><th class="del-col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="ghost" style="margin-top:10px;" onclick="addReuniao()">+ Reunião</button>
+    </section>
+  </main>
+
+  <div class="save-flash" id="saveFlash">Salvo ✓</div>
+
+  <div class="modal-overlay" id="modalOverlay" onclick="onModalOverlayClick(event)">
+    <div class="modal-box">
+      <h3 id="modalTitle">Novo item</h3>
+      <input type="text" id="modalInput" placeholder="">
+      <div class="modal-actions">
+        <button class="ghost" onclick="closeModal()">Cancelar</button>
+        <button onclick="confirmModal()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
