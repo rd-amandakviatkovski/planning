@@ -8,5 +8,5 @@
 // funciona). A proteção de verdade fica nas políticas de acesso (RLS) lá
 // no banco, não em esconder essa chave. Veja o README para mais detalhes.
 
-const SUPABASE_URL = 'https://ntqwkedppjelztzqnrae.supabase.co/rest/v1/';
+const SUPABASE_URL = 'https://ntqwkedppjelztzqnrae.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_NaLWvA_Yfmgp8DCTb0vrDQ_52Zyt4pf';
