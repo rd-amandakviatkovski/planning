@@ -1,26 +1,18 @@
 /* ==========================================================================
  * PLANNING SEMANAL — frontend + acesso ao banco (Supabase)
- *
- * Este arquivo substitui o antigo par Code.gs + JavaScript.html do Apps
- * Script. A estrutura de dados em memória (DATA) continua com o mesmo
- * formato de antes (Links, Semana, Entregas, etc. com os mesmos nomes de
- * campo em PascalCase), então quase toda a lógica de renderização da tela
- * é igual — só troca quem fala com o banco.
  * ========================================================================== */
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'];
+const TASK_WARNING_THRESHOLD = 7;
 
-// Nome da tabela no Supabase para cada "aba" de antes
 const TABLES = {
   Links: 'links', Semana: 'semana', Entregas: 'entregas', Grupos: 'grupos',
   Subtarefas: 'subtarefas', JiraLinks: 'jira_links', ParaPensar: 'para_pensar',
   Planning: 'planning', Reunioes: 'reunioes'
 };
 
-// De-para entre o nome do campo usado no front (PascalCase, igual antes)
-// e o nome da coluna no Postgres (snake_case).
 const FIELD_MAP = {
   Links:      { Icone: 'icone', Texto: 'texto', URL: 'url' },
   Semana:     { Dia: 'dia', Texto: 'texto', Concluido: 'concluido', SemanaID: 'semana_id' },
@@ -33,6 +25,8 @@ const FIELD_MAP = {
   Reunioes:   { Reuniao: 'reuniao', Documentos: 'documentos', DocumentosURL: 'documentos_url', ToDos: 'todos' }
 };
 
+// Documento/Documentos agora usam o tipo "linkbadge" — mesmo visual do
+// badge de Links principal, em vez do campo duplo de texto de antes.
 const TABLE_CONFIG = {
   Entregas:   { tbody: 'entregasTable',  cols: [
     { key: 'Prioridade', type: 'select', options: ['Alta', 'Média', 'Baixa'] },
@@ -41,12 +35,12 @@ const TABLE_CONFIG = {
   ]},
   ParaPensar: { tbody: 'pensarTable', cols: [
     { key: 'Tarefa', type: 'text', placeholder: 'Nome da tarefa central' },
-    { key: 'Documento', type: 'linkname', urlKey: 'DocumentoURL', placeholder: 'Nome do documento' },
+    { key: 'Documento', type: 'linkbadge', urlKey: 'DocumentoURL' },
     { key: 'Prioridade', type: 'select', options: ['Alta', 'Média', 'Baixa'] }
   ]},
   Reunioes:   { tbody: 'reunioesTable', cols: [
     { key: 'Reuniao', type: 'text', placeholder: 'Nome da reunião' },
-    { key: 'Documentos', type: 'linkname', urlKey: 'DocumentosURL', placeholder: 'Nome do documento' },
+    { key: 'Documentos', type: 'linkbadge', urlKey: 'DocumentosURL' },
     { key: 'ToDos', type: 'text', placeholder: 'O que ficou de ação' }
   ]}
 };
@@ -57,7 +51,47 @@ let viewWeekId = null;
 let weeksList = [];
 let plannedWeeks = [];
 
-document.addEventListener('DOMContentLoaded', loadAll);
+document.addEventListener('DOMContentLoaded', function () {
+  loadCollapsedSections();
+  applyCollapsedSections();
+  initAuth();
+});
+
+/* ==========================================================================
+ * Login (Supabase Auth)
+ * ========================================================================== */
+async function initAuth() {
+  const { data } = await sb.auth.getSession();
+  if (data.session) showApp(); else showLogin();
+  sb.auth.onAuthStateChange(function (event, session) {
+    if (session) showApp(); else showLogin();
+  });
+}
+function showLogin() {
+  document.getElementById('authGate').style.display = 'flex';
+  document.getElementById('mainApp').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('authGate').style.display = 'none';
+  document.getElementById('mainApp').style.display = '';
+  loadAll();
+}
+async function doLogin() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Preencha e-mail e senha.'; return; }
+  const { error } = await sb.auth.signInWithPassword({ email: email, password: password });
+  if (error) errEl.textContent = 'E-mail ou senha incorretos.';
+}
+async function doLogout() {
+  await sb.auth.signOut();
+}
+document.addEventListener('keydown', function (e) {
+  const gate = document.getElementById('authGate');
+  if (gate && gate.style.display !== 'none' && e.key === 'Enter') doLogin();
+});
 
 /* ---------------- Tradução de campos front <-> banco ---------------- */
 function toDb(sheetName, jsData) {
@@ -117,11 +151,12 @@ function renderAll() {
   renderTableFor('ParaPensar');
   renderPlanning();
   renderTableFor('Reunioes');
+  updateCounts();
 }
 
 function weekLabel(id) {
   if (!id) return '';
-  const parts = id.split('-'); // yyyy-mm-dd(-sufixo)
+  const parts = id.split('-');
   return 'Semana de ' + parts[2] + '/' + parts[1] + '/' + parts[0];
 }
 function genId() { return 'g' + Date.now() + Math.floor(Math.random() * 1000); }
@@ -134,7 +169,54 @@ function flash() {
   flash._t = setTimeout(function () { el.classList.remove('show'); }, 1100);
 }
 
-/* ---------------- CRUD genérico contra o Supabase ---------------- */
+/* ==========================================================================
+ * Seções retráteis (com memória entre visitas)
+ * ========================================================================== */
+const COLLAPSE_KEY = 'planningSemanal:collapsedSections';
+let collapsedSections = new Set();
+function loadCollapsedSections() {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_KEY);
+    collapsedSections = new Set(raw ? JSON.parse(raw) : []);
+  } catch (e) { collapsedSections = new Set(); }
+}
+function saveCollapsedSections() {
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(collapsedSections))); } catch (e) {}
+}
+function applyCollapsedSections() {
+  document.querySelectorAll('.card.collapsible').forEach(function (card) {
+    card.classList.toggle('collapsed', collapsedSections.has(card.id));
+  });
+}
+function toggleSection(id) {
+  if (collapsedSections.has(id)) collapsedSections.delete(id); else collapsedSections.add(id);
+  saveCollapsedSections();
+  applyCollapsedSections();
+}
+function collapseAllSections() {
+  document.querySelectorAll('.card.collapsible').forEach(function (card) { collapsedSections.add(card.id); });
+  saveCollapsedSections(); applyCollapsedSections();
+}
+function expandAllSections() {
+  collapsedSections.clear();
+  saveCollapsedSections(); applyCollapsedSections();
+}
+function updateCounts() {
+  setCount('count-links', DATA.Links.length);
+  setCount('count-semana', DATA.Semana.filter(function (t) { return t.SemanaID === viewWeekId; }).length);
+  setCount('count-entregas', DATA.Entregas.length);
+  setCount('count-tarefas', DATA.Grupos.length);
+  setCount('count-pensar', DATA.ParaPensar.length);
+  setCount('count-reunioes', DATA.Reunioes.length);
+}
+function setCount(id, n) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = n ? ('· ' + n) : '';
+}
+
+/* ==========================================================================
+ * CRUD genérico contra o Supabase
+ * ========================================================================== */
 async function sbInsertOne(sheetName, jsData) {
   const table = TABLES[sheetName];
   const payload = toDb(sheetName, jsData);
@@ -142,12 +224,6 @@ async function sbInsertOne(sheetName, jsData) {
   if (error) throw error;
   return fromDb(sheetName, data);
 }
-
-// obj é o objeto que já está (otimisticamente) em DATA[sheetName]; assim que
-// o insert confirma, guardamos o id real nele (_id). Se uma edição ou
-// exclusão for tentada antes do insert terminar, ela fica "pendurada" em
-// obj._pending / obj._pendingDelete e é aplicada logo em seguida — mesma
-// ideia de segurança que já usávamos no Apps Script.
 async function apiAdd(sheetName, jsData, obj) {
   try {
     const table = TABLES[sheetName];
@@ -225,21 +301,62 @@ function onModalOverlayClick(e) {
   if (e.target.id === 'modalOverlay') closeModal();
 }
 
-/* ---------------- Links / badges ---------------- */
+/* ==========================================================================
+ * Badge de link reutilizável (mesmo visual em toda a página)
+ * ========================================================================== */
+function buildLinkBadge(nome, url, onEdit, onDelete) {
+  const span = document.createElement('span');
+  span.className = 'badge';
+  const a = document.createElement('a');
+  a.href = url || '#'; a.target = '_blank'; a.title = url || '';
+  a.textContent = '🔗 ' + (nome || 'Link');
+  span.appendChild(a);
+  if (onEdit) {
+    const edit = document.createElement('span');
+    edit.className = 'x'; edit.textContent = '✎'; edit.title = 'Editar';
+    edit.onclick = function (e) { e.preventDefault(); e.stopPropagation(); onEdit(); };
+    span.appendChild(edit);
+  }
+  const del = document.createElement('span');
+  del.className = 'x'; del.textContent = '✕'; del.title = 'Remover';
+  del.onclick = function (e) { e.preventDefault(); e.stopPropagation(); onDelete(); };
+  span.appendChild(del);
+  return span;
+}
+function buildInlineLinkForm(initialNome, initialUrl, onSave, onCancel) {
+  const form = document.createElement('div'); form.className = 'link-form';
+  const nomeInp = document.createElement('input');
+  nomeInp.type = 'text'; nomeInp.placeholder = 'Nome do link'; nomeInp.value = initialNome || '';
+  const urlInp = document.createElement('input');
+  urlInp.type = 'text'; urlInp.placeholder = 'Cole a URL aqui'; urlInp.value = initialUrl || '';
+  const row = document.createElement('div'); row.className = 'link-form-actions';
+  const saveBtn = document.createElement('button'); saveBtn.textContent = 'Salvar';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'ghost'; cancelBtn.textContent = 'Cancelar';
+  const warn = document.createElement('div'); warn.className = 'link-form-warn';
+  saveBtn.onclick = function () {
+    const texto = nomeInp.value.trim();
+    const url = urlInp.value.trim();
+    if (!texto || !url) { warn.textContent = 'Preencha o nome e a URL antes de salvar.'; return; }
+    onSave(texto, url);
+  };
+  cancelBtn.onclick = onCancel;
+  urlInp.onkeydown = function (e) { if (e.key === 'Enter') saveBtn.click(); };
+  row.appendChild(saveBtn); row.appendChild(cancelBtn);
+  form.appendChild(nomeInp); form.appendChild(urlInp); form.appendChild(warn); form.appendChild(row);
+  setTimeout(function () { nomeInp.focus(); }, 0);
+  return form;
+}
+
+/* ---------------- Links principais ---------------- */
 function renderLinks() {
   const box = document.getElementById('badges');
   box.innerHTML = '';
   DATA.Links.forEach(function (r) {
-    const span = document.createElement('span');
-    span.className = 'badge';
-    const a = document.createElement('a');
-    a.href = r.URL || '#'; a.target = '_blank'; a.title = r.URL || '';
-    a.textContent = (r.Icone || '🔗') + ' ' + r.Texto;
-    const x = document.createElement('span');
-    x.className = 'x'; x.textContent = '✕';
-    x.onclick = function () { DATA.Links = DATA.Links.filter(function (l) { return l !== r; }); renderLinks(); apiDelete('Links', r); };
-    span.appendChild(a); span.appendChild(x);
-    box.appendChild(span);
+    box.appendChild(buildLinkBadge(r.Icone ? r.Icone + ' ' + r.Texto : r.Texto, r.URL, null, function () {
+      DATA.Links = DATA.Links.filter(function (l) { return l !== r; });
+      renderLinks(); updateCounts();
+      apiDelete('Links', r);
+    }));
   });
 }
 function addLink() {
@@ -248,14 +365,16 @@ function addLink() {
   const url = document.getElementById('newLinkUrl').value.trim();
   if (!texto) return;
   const obj = { Icone: icone, Texto: texto, URL: url, _id: null };
-  DATA.Links.push(obj); renderLinks();
+  DATA.Links.push(obj); renderLinks(); updateCounts();
   document.getElementById('newLinkIcon').value = '';
   document.getElementById('newLinkText').value = '';
   document.getElementById('newLinkUrl').value = '';
   apiAdd('Links', { Icone: icone, Texto: texto, URL: url }, obj);
 }
 
-/* ---------------- Semanas (settings: currentWeekId / plannedWeeks) ---------------- */
+/* ==========================================================================
+ * Semanas (settings: currentWeekId / plannedWeeks)
+ * ========================================================================== */
 function formatWeekId(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -315,7 +434,7 @@ function renderWeekSelector() {
 }
 function onWeekSelectChange() {
   viewWeekId = document.getElementById('weekSelect').value;
-  renderWeek(); renderPulse();
+  renderWeek(); renderPulse(); updateCounts();
 }
 async function planFutureWeek() {
   try {
@@ -332,7 +451,7 @@ async function planFutureWeek() {
     if (weeksList.indexOf(id) === -1) weeksList.push(id);
     weeksList.sort().reverse();
     viewWeekId = id;
-    renderWeekSelector(); renderWeek(); renderPulse();
+    renderWeekSelector(); renderWeek(); renderPulse(); updateCounts();
   } catch (err) { onError(err); }
 }
 async function promoteCurrentView() {
@@ -345,8 +464,6 @@ async function promoteCurrentView() {
     await loadAll();
   } catch (err) { onError(err); }
 }
-// Igual à correção que fizemos no Apps Script: copia as tarefas da semana
-// anterior em UMA escrita só (array inteiro no insert), não uma por uma.
 async function endWeek(copyPrevious) {
   const msg = copyPrevious
     ? 'Isso inicia uma semana nova copiando as tarefas da semana atual (desmarcadas). A semana atual continua salva e acessível pelo filtro. Continuar?'
@@ -383,13 +500,18 @@ function renderWeek() {
     col.className = 'day-col';
     const h3 = document.createElement('h3'); h3.textContent = dia;
     col.appendChild(h3);
-    DATA.Semana.filter(function (t) { return t.Dia === dia && t.SemanaID === viewWeekId; }).forEach(function (t) {
-      col.appendChild(buildTaskItem(t));
-    });
+    const dayTasks = DATA.Semana.filter(function (t) { return t.Dia === dia && t.SemanaID === viewWeekId; });
+    dayTasks.forEach(function (t) { col.appendChild(buildTaskItem(t)); });
     const addBtn = document.createElement('button');
     addBtn.className = 'add-task'; addBtn.textContent = '+ adicionar tarefa';
     addBtn.onclick = function () { addTask(dia); };
     col.appendChild(addBtn);
+    if (dayTasks.length > TASK_WARNING_THRESHOLD) {
+      const warn = document.createElement('div');
+      warn.className = 'day-warning';
+      warn.textContent = 'Que tal repensar e repriorizar algumas coisas?';
+      col.appendChild(warn);
+    }
     board.appendChild(col);
   });
 }
@@ -412,7 +534,7 @@ function buildTaskItem(t) {
 function addTask(dia) {
   customPrompt('Nova tarefa — ' + dia, 'Descreva a tarefa...', function (txt) {
     const obj = { Dia: dia, Texto: txt, Concluido: false, SemanaID: viewWeekId, _id: null };
-    DATA.Semana.push(obj); renderWeek(); renderPulse();
+    DATA.Semana.push(obj); renderWeek(); renderPulse(); updateCounts();
     apiAdd('Semana', { Dia: dia, Texto: txt, Concluido: false, SemanaID: viewWeekId }, obj);
   });
 }
@@ -427,7 +549,7 @@ function editTaskText(t, newText) {
 }
 function deleteTask(t) {
   DATA.Semana = DATA.Semana.filter(function (r) { return r !== t; });
-  renderWeek(); renderPulse();
+  renderWeek(); renderPulse(); updateCounts();
   apiDelete('Semana', t);
 }
 
@@ -479,7 +601,9 @@ function toggleEntregasSort() {
   renderTableFor('Entregas');
 }
 
-/* ---------------- Tabelas genéricas (Entregas, ParaPensar, Reunioes) ---------------- */
+/* ==========================================================================
+ * Tabelas genéricas (Entregas, ParaPensar, Reunioes)
+ * ========================================================================== */
 function renderTableFor(sheetName) {
   const cfg = TABLE_CONFIG[sheetName];
   const tbody = document.querySelector('#' + cfg.tbody + ' tbody');
@@ -515,37 +639,30 @@ function renderTableFor(sheetName) {
           r[c.key] = this.value;
         };
         td.appendChild(sel);
-      } else if (c.type === 'linkname') {
-        const wrap = document.createElement('div'); wrap.className = 'linkname-cell';
-        const nameInp = document.createElement('input');
-        nameInp.type = 'text'; nameInp.className = 'name-input';
-        nameInp.value = r[c.key] || ''; nameInp.placeholder = c.placeholder || 'Nome';
-        nameInp.onblur = function () {
-          const upd = {}; upd[c.key] = this.value;
-          apiUpdate(sheetName, r, upd);
-          r[c.key] = this.value;
-        };
-        const urlRow = document.createElement('div'); urlRow.className = 'url-row';
-        const urlInp = document.createElement('input');
-        urlInp.type = 'text'; urlInp.className = 'url-input';
-        urlInp.value = r[c.urlKey] || ''; urlInp.placeholder = 'https://...';
-        const openBtn = document.createElement('a');
-        openBtn.className = 'link-open-btn'; openBtn.textContent = '↗';
-        openBtn.target = '_blank'; openBtn.title = 'Abrir link';
-        const refreshOpenBtn = function () {
-          const v = (urlInp.value || '').trim();
-          if (/^https?:\/\//i.test(v)) { openBtn.href = v; openBtn.style.display = 'inline-flex'; }
-          else { openBtn.style.display = 'none'; }
-        };
-        refreshOpenBtn();
-        urlInp.oninput = refreshOpenBtn;
-        urlInp.onblur = function () {
-          const upd = {}; upd[c.urlKey] = this.value;
-          apiUpdate(sheetName, r, upd);
-          r[c.urlKey] = this.value;
-        };
-        urlRow.appendChild(urlInp); urlRow.appendChild(openBtn);
-        wrap.appendChild(nameInp); wrap.appendChild(urlRow);
+      } else if (c.type === 'linkbadge') {
+        const wrap = document.createElement('div');
+        if (r._editingLink) {
+          wrap.appendChild(buildInlineLinkForm(r[c.key], r[c.urlKey], function (nome, url) {
+            const upd = {}; upd[c.key] = nome; upd[c.urlKey] = url;
+            apiUpdate(sheetName, r, upd);
+            r[c.key] = nome; r[c.urlKey] = url; r._editingLink = false;
+            renderTableFor(sheetName);
+          }, function () { r._editingLink = false; renderTableFor(sheetName); }));
+        } else if (r[c.key]) {
+          wrap.appendChild(buildLinkBadge(r[c.key], r[c.urlKey], function () {
+            r._editingLink = true; renderTableFor(sheetName);
+          }, function () {
+            const upd = {}; upd[c.key] = ''; upd[c.urlKey] = '';
+            apiUpdate(sheetName, r, upd);
+            r[c.key] = ''; r[c.urlKey] = '';
+            renderTableFor(sheetName);
+          }));
+        } else {
+          const addBtn = document.createElement('button');
+          addBtn.className = 'add-task'; addBtn.textContent = '+ adicionar link';
+          addBtn.onclick = function () { r._editingLink = true; renderTableFor(sheetName); };
+          wrap.appendChild(addBtn);
+        }
         td.appendChild(wrap);
       } else {
         const inp = document.createElement('input');
@@ -564,7 +681,7 @@ function renderTableFor(sheetName) {
     const delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.textContent = '✕';
     delBtn.onclick = function () {
       DATA[sheetName] = DATA[sheetName].filter(function (x) { return x !== r; });
-      renderTableFor(sheetName);
+      renderTableFor(sheetName); updateCounts();
       apiDelete(sheetName, r);
     };
     delTd.appendChild(delBtn);
@@ -575,15 +692,19 @@ function renderTableFor(sheetName) {
 function addRowOptimistic(sheetName, data) {
   const obj = Object.assign({ _id: null }, data);
   DATA[sheetName].push(obj);
-  renderTableFor(sheetName);
+  renderTableFor(sheetName); updateCounts();
   apiAdd(sheetName, data, obj);
 }
 function addEntrega() { addRowOptimistic('Entregas', { Prioridade: 'Baixa', Entrega: '', Status: 'standby' }); }
 function addPensar()  { addRowOptimistic('ParaPensar', { Tarefa: '', Documento: '', DocumentoURL: '', Prioridade: 'Baixa' }); }
 function addReuniao() { addRowOptimistic('Reunioes', { Reuniao: '', Documentos: '', DocumentosURL: '', ToDos: '' }); }
 
-/* ---------------- Tarefas da semana (grupos) ---------------- */
+/* ==========================================================================
+ * Tarefas da semana (grupos)
+ * ========================================================================== */
 const collapsedGroups = new Set();
+const openLinkForms = new Set();   // grupoId com formulário de "novo link" aberto
+let editingJiraLink = null;        // JiraLinks row sendo editada no momento, ou null
 
 function renderGrupos() {
   const list = document.getElementById('gruposList');
@@ -630,17 +751,27 @@ function renderGrupos() {
 
     const linkCol = document.createElement('div'); linkCol.className = 'grupo-links';
     linkCol.innerHTML = '<h4>Links (Jira / docs)</h4>';
+    const badgesWrap = document.createElement('div'); badgesWrap.className = 'badges';
     DATA.JiraLinks.filter(function (l) { return l.GrupoID === g.ID; }).forEach(function (l) {
-      const row = document.createElement('div'); row.className = 'link-row';
-      row.innerHTML = '<a href="' + l.URL + '" target="_blank" title="' + l.URL + '">📄 ' + l.Texto + '</a>';
-      const del = document.createElement('span'); del.className = 'del'; del.style.opacity = '.6'; del.textContent = '✕';
-      del.style.cursor = 'pointer';
-      del.onclick = function () { deleteGLink(l); };
-      row.appendChild(del);
-      linkCol.appendChild(row);
+      badgesWrap.appendChild(buildLinkBadge(l.Texto, l.URL, function () {
+        editingJiraLink = l; renderGrupos();
+      }, function () { deleteGLink(l); }));
     });
-    if (openLinkForms.has(g.ID)) {
-      linkCol.appendChild(buildLinkForm(g.ID));
+    linkCol.appendChild(badgesWrap);
+
+    if (editingJiraLink && editingJiraLink.GrupoID === g.ID) {
+      linkCol.appendChild(buildInlineLinkForm(editingJiraLink.Texto, editingJiraLink.URL, function (nome, url) {
+        apiUpdate('JiraLinks', editingJiraLink, { Texto: nome, URL: url });
+        editingJiraLink.Texto = nome; editingJiraLink.URL = url;
+        editingJiraLink = null; renderGrupos();
+      }, function () { editingJiraLink = null; renderGrupos(); }));
+    } else if (openLinkForms.has(g.ID)) {
+      linkCol.appendChild(buildInlineLinkForm('', '', function (nome, url) {
+        openLinkForms.delete(g.ID);
+        const obj = { GrupoID: g.ID, Texto: nome, URL: url, _id: null };
+        DATA.JiraLinks.push(obj); renderGrupos();
+        apiAdd('JiraLinks', { GrupoID: g.ID, Texto: nome, URL: url }, obj);
+      }, function () { toggleLinkForm(g.ID); }));
     } else {
       const addL = document.createElement('button');
       addL.className = 'add-task'; addL.textContent = '+ adicionar link';
@@ -694,16 +825,13 @@ function scheduleSubtaskToDay(s, dia) {
   const obj = { Dia: dia, Texto: s.Texto, Concluido: false, SemanaID: viewWeekId, _id: null };
   DATA.Semana.push(obj);
   scheduleOpenFor = null;
-  renderGrupos(); renderWeek(); renderPulse();
+  renderGrupos(); renderWeek(); renderPulse(); updateCounts();
   apiAdd('Semana', { Dia: dia, Texto: s.Texto, Concluido: false, SemanaID: viewWeekId }, obj);
 }
 function addGrupo() {
-  // O ID é gerado aqui mesmo, no navegador, e usado como chave primária no
-  // banco — por isso já sabemos o _id na hora, sem precisar esperar o
-  // insert confirmar (diferente das outras tabelas, que usam id automático).
   const id = genId();
   const obj = { ID: id, Nome: 'Novo grupo de tarefas', _id: id };
-  DATA.Grupos.push(obj); renderGrupos();
+  DATA.Grupos.push(obj); renderGrupos(); updateCounts();
   apiAdd('Grupos', { ID: id, Nome: 'Novo grupo de tarefas' }, obj);
 }
 async function deleteGrupo(g) {
@@ -713,9 +841,9 @@ async function deleteGrupo(g) {
   DATA.Subtarefas = DATA.Subtarefas.filter(function (s) { return s.GrupoID !== grupoId; });
   DATA.JiraLinks = DATA.JiraLinks.filter(function (l) { return l.GrupoID !== grupoId; });
   collapsedGroups.delete(grupoId);
-  renderGrupos();
-  // O banco tem "on delete cascade" nas tabelas subtarefas e jira_links,
-  // então apagar o grupo já limpa tudo relacionado automaticamente.
+  renderGrupos(); updateCounts();
+  // O banco tem "on delete cascade" em subtarefas/jira_links, então apagar
+  // o grupo já limpa tudo relacionado automaticamente.
   apiDelete('Grupos', g);
 }
 function addSubtask(grupoId) {
@@ -735,39 +863,9 @@ function deleteSubtask(s) {
   renderGrupos();
   apiDelete('Subtarefas', s);
 }
-const openLinkForms = new Set();
 function toggleLinkForm(grupoId) {
   if (openLinkForms.has(grupoId)) openLinkForms.delete(grupoId); else openLinkForms.add(grupoId);
   renderGrupos();
-}
-function buildLinkForm(grupoId) {
-  const form = document.createElement('div'); form.className = 'link-form';
-  const nomeInp = document.createElement('input');
-  nomeInp.type = 'text'; nomeInp.placeholder = 'Nome do link (ex: tarefa Jira)';
-  const urlInp = document.createElement('input');
-  urlInp.type = 'text'; urlInp.placeholder = 'Cole a URL aqui';
-  const row = document.createElement('div'); row.className = 'link-form-actions';
-  const saveBtn = document.createElement('button'); saveBtn.textContent = 'Salvar';
-  const cancelBtn = document.createElement('button'); cancelBtn.className = 'ghost'; cancelBtn.textContent = 'Cancelar';
-  const warn = document.createElement('div'); warn.className = 'link-form-warn';
-  saveBtn.onclick = function () {
-    const texto = nomeInp.value.trim();
-    const url = urlInp.value.trim();
-    if (!texto || !url) {
-      warn.textContent = 'Preencha o nome e a URL antes de salvar.';
-      return;
-    }
-    openLinkForms.delete(grupoId);
-    const obj = { GrupoID: grupoId, Texto: texto, URL: url, _id: null };
-    DATA.JiraLinks.push(obj); renderGrupos();
-    apiAdd('JiraLinks', { GrupoID: grupoId, Texto: texto, URL: url }, obj);
-  };
-  cancelBtn.onclick = function () { toggleLinkForm(grupoId); };
-  urlInp.onkeydown = function (e) { if (e.key === 'Enter') saveBtn.click(); };
-  row.appendChild(saveBtn); row.appendChild(cancelBtn);
-  form.appendChild(nomeInp); form.appendChild(urlInp); form.appendChild(warn); form.appendChild(row);
-  setTimeout(function () { nomeInp.focus(); }, 0);
-  return form;
 }
 function deleteGLink(l) {
   DATA.JiraLinks = DATA.JiraLinks.filter(function (x) { return x !== l; });
@@ -775,16 +873,21 @@ function deleteGLink(l) {
   apiDelete('JiraLinks', l);
 }
 
-/* ---------------- Planning semanal ---------------- */
+/* ==========================================================================
+ * Planning semanal (texto rico, sem Bloqueios)
+ * ========================================================================== */
+function rtCmd(cmd) {
+  document.execCommand(cmd, false, null);
+  document.getElementById('outcomes').focus();
+}
 function renderPlanning() {
   if (DATA.Planning.length) {
-    document.getElementById('outcomes').value = DATA.Planning[0].Outcomes || '';
-    document.getElementById('bloqueios').value = DATA.Planning[0].Bloqueios || '';
+    document.getElementById('outcomes').innerHTML = DATA.Planning[0].Outcomes || '';
   }
 }
 function savePlanning() {
   if (!DATA.Planning.length) return;
-  const data = { Outcomes: document.getElementById('outcomes').value, Bloqueios: document.getElementById('bloqueios').value };
-  apiUpdate('Planning', DATA.Planning[0], data);
-  DATA.Planning[0] = Object.assign(DATA.Planning[0], data);
+  const html = document.getElementById('outcomes').innerHTML;
+  apiUpdate('Planning', DATA.Planning[0], { Outcomes: html });
+  DATA.Planning[0].Outcomes = html;
 }
