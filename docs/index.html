@@ -8,9 +8,27 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <main class="page">
+
+  <!-- Tela de login — só passa disso quem tiver usuário/senha cadastrados no Supabase -->
+  <div class="auth-gate" id="authGate">
+    <div class="auth-box">
+      <h2>Planning Semanal</h2>
+      <p class="hint">Acesso restrito. Entre para continuar.</p>
+      <input type="email" id="authEmail" placeholder="seu e-mail" autocomplete="username">
+      <input type="password" id="authPassword" placeholder="senha" autocomplete="current-password">
+      <button onclick="doLogin()">Entrar</button>
+      <div class="auth-error" id="authError"></div>
+    </div>
+  </div>
+
+  <main class="page" id="mainApp" style="display:none;">
     <header class="page-header">
       <h1>Planning Semanal</h1>
+      <div class="page-toolbar">
+        <button class="ghost" onclick="expandAllSections()">Abrir tudo</button>
+        <button class="ghost" onclick="collapseAllSections()">Fechar tudo</button>
+        <button class="ghost" onclick="doLogout()">Sair</button>
+      </div>
     </header>
 
     <div class="pulse">
@@ -18,88 +36,141 @@
       <div class="pulse-days" id="pulseDays"></div>
     </div>
 
-    <section class="card" id="links-card">
-      <div class="badges" id="badges"></div>
-      <div class="add-inline">
-        <input type="text" id="newLinkIcon" placeholder="📄" style="max-width:50px;text-align:center;">
-        <input type="text" id="newLinkText" placeholder="Nome do link">
-        <input type="url" id="newLinkUrl" placeholder="https://...">
-        <button onclick="addLink()">+ Link</button>
+    <section class="card collapsible" id="links-card">
+      <div class="card-header" onclick="toggleSection('links-card')">
+        <div class="card-header-title">
+          <h2>Links <span class="count" id="count-links"></span></h2>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <div class="badges" id="badges"></div>
+        <div class="add-inline">
+          <input type="text" id="newLinkIcon" placeholder="📄" style="max-width:50px;text-align:center;">
+          <input type="text" id="newLinkText" placeholder="Nome do link">
+          <input type="url" id="newLinkUrl" placeholder="https://...">
+          <button onclick="addLink()">+ Link</button>
+        </div>
       </div>
     </section>
 
-    <section class="card" id="semana">
-      <h2>Semana</h2>
-      <div class="week-controls">
-        <select id="weekSelect" onchange="onWeekSelectChange()"></select>
-        <button class="ghost" onclick="planFutureWeek()">+ Planejar semana futura</button>
-        <button id="promoteBtn" style="display:none;" onclick="promoteCurrentView()">Tornar esta a semana atual →</button>
-        <button class="ghost" onclick="endWeek(false)">Encerrar semana e iniciar nova →</button>
-        <button class="ghost" onclick="endWeek(true)">Encerrar e copiar tarefas da semana anterior →</button>
+    <section class="card collapsible" id="semana">
+      <div class="card-header" onclick="toggleSection('semana')">
+        <div class="card-header-title">
+          <h2>Semana <span class="count" id="count-semana"></span></h2>
+          <p class="hint">Para organizar o que precisa ser feito em cada dia. Use "Planejar semana futura" pra já montar a próxima semana sem mexer na atual — quando ela chegar, é só clicar em "Tornar esta a semana atual".</p>
+        </div>
+        <span class="chev">▾</span>
       </div>
-      <p class="hint">Para organizar o que precisa ser feito em cada dia. Use "Planejar semana futura" pra já montar a próxima semana sem mexer na atual — quando ela chegar, é só clicar em "Tornar esta a semana atual".</p>
-      <div class="week-board" id="weekBoard"></div>
-    </section>
-
-    <section class="card" id="entregas">
-      <h2>Entregas da semana</h2>
-      <p class="hint">Para entender se conseguiu entregar tudo que precisa e se entregou algo a mais.</p>
-      <div class="table-filters">
-        <select id="filterStatus" onchange="onEntregasFilterChange()">
-          <option value="Todos">Status: todos</option>
-          <option value="standby">standby</option>
-          <option value="andamento">andamento</option>
-          <option value="concluído">concluído</option>
-        </select>
-        <select id="filterPrioridade" onchange="onEntregasFilterChange()">
-          <option value="Todos">Prioridade: todas</option>
-          <option value="Alta">Alta</option>
-          <option value="Média">Média</option>
-          <option value="Baixa">Baixa</option>
-        </select>
-        <button class="ghost sort-btn" id="sortBtn" onclick="toggleEntregasSort()">Entrega A → Z</button>
+      <div class="card-body">
+        <div class="week-controls">
+          <select id="weekSelect" onchange="onWeekSelectChange()" onclick="event.stopPropagation()"></select>
+          <button class="ghost" onclick="event.stopPropagation();planFutureWeek()">+ Planejar semana futura</button>
+          <button id="promoteBtn" style="display:none;" onclick="event.stopPropagation();promoteCurrentView()">Tornar esta a semana atual →</button>
+          <button class="ghost" onclick="event.stopPropagation();endWeek(false)">Encerrar semana e iniciar nova →</button>
+          <button class="ghost" onclick="event.stopPropagation();endWeek(true)">Encerrar e copiar tarefas da semana anterior →</button>
+        </div>
+        <div class="week-board" id="weekBoard"></div>
       </div>
-      <table id="entregasTable">
-        <thead><tr><th style="width:110px;">Prioridade</th><th>Entrega</th><th style="width:140px;">Status</th><th class="del-col"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <button class="ghost" style="margin-top:10px;" onclick="addEntrega()">+ Entrega</button>
     </section>
 
-    <section class="card" id="tarefas">
-      <h2>Tarefas da semana</h2>
-      <p class="hint">Para organizar o que será feito na semana, com subtarefas e links do Jira.</p>
-      <div id="gruposList"></div>
-      <button class="ghost" onclick="addGrupo()">+ Grupo de tarefas</button>
+    <section class="card collapsible" id="entregas">
+      <div class="card-header" onclick="toggleSection('entregas')">
+        <div class="card-header-title">
+          <h2>Entregas da semana <span class="count" id="count-entregas"></span></h2>
+          <p class="hint">Para entender se conseguiu entregar tudo que precisa e se entregou algo a mais.</p>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <div class="table-filters" onclick="event.stopPropagation()">
+          <select id="filterStatus" onchange="onEntregasFilterChange()">
+            <option value="Todos">Status: todos</option>
+            <option value="standby">standby</option>
+            <option value="andamento">andamento</option>
+            <option value="concluído">concluído</option>
+          </select>
+          <select id="filterPrioridade" onchange="onEntregasFilterChange()">
+            <option value="Todos">Prioridade: todas</option>
+            <option value="Alta">Alta</option>
+            <option value="Média">Média</option>
+            <option value="Baixa">Baixa</option>
+          </select>
+          <button class="ghost sort-btn" id="sortBtn" onclick="toggleEntregasSort()">Entrega A → Z</button>
+        </div>
+        <table id="entregasTable">
+          <thead><tr><th style="width:110px;">Prioridade</th><th>Entrega</th><th style="width:140px;">Status</th><th class="del-col"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="ghost" style="margin-top:10px;" onclick="addEntrega()">+ Entrega</button>
+      </div>
     </section>
 
-    <section class="card" id="pensar">
-      <h2>Para pensar e organizar</h2>
-      <p class="hint">Para mapear tarefas ou projetos não urgentes que podem ficar para o futuro.</p>
-      <table id="pensarTable">
-        <thead><tr><th>Tarefa central</th><th style="width:210px;">Documento</th><th style="width:110px;">Prioridade</th><th class="del-col"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <button class="ghost" style="margin-top:10px;" onclick="addPensar()">+ Tarefa</button>
+    <section class="card collapsible" id="tarefas">
+      <div class="card-header" onclick="toggleSection('tarefas')">
+        <div class="card-header-title">
+          <h2>Tarefas da semana <span class="count" id="count-tarefas"></span></h2>
+          <p class="hint">Para organizar o que será feito na semana, com subtarefas e links do Jira.</p>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <div id="gruposList"></div>
+        <button class="ghost" onclick="addGrupo()">+ Grupo de tarefas</button>
+      </div>
     </section>
 
-    <section class="card" id="planning">
-      <h2>Reunião de planning semanal</h2>
-      <p class="hint">Para organizar outcomes e bloqueios.</p>
-      <h4 style="margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);">Outcomes (resultados / entregas)</h4>
-      <textarea id="outcomes" placeholder="Liste os principais resultados esperados na semana..." onblur="savePlanning()"></textarea>
-      <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);">Bloqueios</h4>
-      <textarea id="bloqueios" placeholder="O que está travando o andamento?" onblur="savePlanning()"></textarea>
+    <section class="card collapsible" id="pensar">
+      <div class="card-header" onclick="toggleSection('pensar')">
+        <div class="card-header-title">
+          <h2>Para pensar e organizar <span class="count" id="count-pensar"></span></h2>
+          <p class="hint">Para mapear tarefas ou projetos não urgentes que podem ficar para o futuro.</p>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <table id="pensarTable">
+          <thead><tr><th>Tarefa central</th><th style="width:220px;">Documento</th><th style="width:110px;">Prioridade</th><th class="del-col"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="ghost" style="margin-top:10px;" onclick="addPensar()">+ Tarefa</button>
+      </div>
     </section>
 
-    <section class="card" id="reunioes">
-      <h2>Reuniões</h2>
-      <p class="hint">Para organizar as reuniões e anotar coisas importantes delas.</p>
-      <table id="reunioesTable">
-        <thead><tr><th>Reunião</th><th style="width:210px;">Documentos</th><th>To-dos</th><th class="del-col"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <button class="ghost" style="margin-top:10px;" onclick="addReuniao()">+ Reunião</button>
+    <section class="card collapsible" id="planning">
+      <div class="card-header" onclick="toggleSection('planning')">
+        <div class="card-header-title">
+          <h2>Reunião de planning semanal</h2>
+          <p class="hint">Para organizar outcomes e resultados esperados.</p>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <h4 style="margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);">Outcomes (resultados / entregas)</h4>
+        <div class="richtext-toolbar" onclick="event.stopPropagation()">
+          <button type="button" class="rt-btn" onclick="rtCmd('bold')"><b>B</b></button>
+          <button type="button" class="rt-btn" onclick="rtCmd('italic')"><i>I</i></button>
+          <button type="button" class="rt-btn" onclick="rtCmd('insertUnorderedList')">• lista</button>
+        </div>
+        <div class="richtext" id="outcomes" contenteditable="true" data-placeholder="Liste os principais resultados esperados na semana..." onblur="savePlanning()"></div>
+      </div>
+    </section>
+
+    <section class="card collapsible" id="reunioes">
+      <div class="card-header" onclick="toggleSection('reunioes')">
+        <div class="card-header-title">
+          <h2>Reuniões <span class="count" id="count-reunioes"></span></h2>
+          <p class="hint">Para organizar as reuniões e anotar coisas importantes delas.</p>
+        </div>
+        <span class="chev">▾</span>
+      </div>
+      <div class="card-body">
+        <table id="reunioesTable">
+          <thead><tr><th>Reunião</th><th style="width:220px;">Documentos</th><th>To-dos</th><th class="del-col"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="ghost" style="margin-top:10px;" onclick="addReuniao()">+ Reunião</button>
+      </div>
     </section>
   </main>
 
