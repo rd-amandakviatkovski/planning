@@ -267,3 +267,58 @@ select.pill-select{
 .modal-box h3{margin:0 0 12px;font-family:'Fraunces',serif;font-size:16px;font-weight:600;}
 .modal-box input{margin-bottom:16px;}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;}
+
+/* ========================================================================
+ * ADIÇÕES — seções retráteis, tela de login, texto rico, aviso de excesso
+ * ======================================================================== */
+
+.page-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+.page-toolbar{display:flex;gap:8px;flex-wrap:wrap;}
+.page-toolbar button{font-size:12px;padding:7px 12px;}
+
+/* Cabeçalho clicável de cada seção */
+.card-header{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  cursor:pointer;
+}
+.card-header .chev{
+  color:var(--ink-soft);font-size:13px;flex-shrink:0;margin-top:4px;
+  transition:transform .15s;
+}
+.card.collapsed .card-header .chev{transform:rotate(-90deg);}
+.card.collapsed .card-body{display:none;}
+.card-body{margin-top:16px;}
+.card-header-title h2{display:flex;align-items:baseline;gap:6px;}
+.count{font-family:'Inter',sans-serif;font-size:12px;font-weight:600;color:var(--ink-soft);}
+
+/* Aviso de dia sobrecarregado */
+.day-warning{
+  margin-top:6px;padding:7px 8px;border-radius:8px;background:var(--gold-soft);
+  color:var(--gold);font-size:11px;font-weight:600;line-height:1.3;text-align:center;
+}
+
+/* Texto rico (Planning) */
+.richtext-toolbar{display:flex;gap:4px;margin-bottom:6px;}
+.rt-btn{background:var(--bg);color:var(--ink-soft);border:1px solid var(--line);padding:5px 10px;font-size:12px;border-radius:6px;}
+.rt-btn:hover{background:var(--teal-soft);color:var(--teal);}
+.richtext{
+  min-height:80px;border:1px solid var(--line);border-radius:8px;background:var(--bg);
+  padding:10px;outline:none;overflow:visible;font-size:13.5px;line-height:1.5;
+}
+.richtext:focus{border-color:var(--teal);background:var(--paper);}
+.richtext:empty:before{content:attr(data-placeholder);color:var(--ink-soft);}
+.richtext ul{margin:6px 0;padding-left:22px;}
+
+/* Tela de login */
+.auth-gate{
+  position:fixed;inset:0;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;z-index:2000;
+}
+.auth-box{
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:32px;width:320px;max-width:90vw;
+  display:flex;flex-direction:column;gap:10px;
+}
+.auth-box h2{font-family:'Fraunces',serif;font-size:20px;margin:0;}
+.auth-box .hint{margin:0 0 4px;color:var(--ink-soft);font-size:12.5px;font-style:italic;}
+.auth-box .auth-error{color:var(--clay);font-size:12px;min-height:14px;}
